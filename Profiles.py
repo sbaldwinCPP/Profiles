@@ -1,12 +1,9 @@
-#%% GP Plotting
-# SAB 6/22/20
-# python 3.7 in spyder
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Oct 5 14:16:23 2021
 
-#%% import modules
-# =============================================================================
-# import tkinter
-# from tkinter import filedialog, messagebox as mb
-# =============================================================================
+@author: sbaldwin
+"""
 
 #%% Import
 print('Importing modules...')
@@ -20,7 +17,6 @@ try:
     import numpy as np
     import pandas as pd
     import easygui
-    import scipy.optimize as opt
     import matplotlib.pyplot as plt
     import matplotlib as mpl
     
@@ -29,11 +25,13 @@ try:
 
 except ModuleNotFoundError as err:
     input(str(err) +' \n Press enter to exit')
+    sys.exit()
 
 #%% Functions
 
 # files
 def Get_Data():
+    print('Use GUI to select data file...')
     inidir = os.getcwd() #starts file selection at working directory
     txt='Select data file...'
     ftyp= '*.xlsx'
@@ -46,14 +44,14 @@ def Get_Data():
     return filepath
 
 def Inputs():
+    print('Use GUI to select inputs...')
     msg = "Enter Settings"
     title = "Enter Settings"
-    fieldNames = ["Scale:","Target Zo:"]
-    fieldValues = [240,0.35]  #Defaults
+    fieldNames = ["Tunnel:", "Scale:", "Target Zo:"]
+    fieldValues = ['GDW', 180, 0.5]  #Defaults
     inputs=easygui.multenterbox(msg, title, fieldNames, fieldValues)
-    inputs= int(inputs[0]),float(inputs[1])
+    inputs= inputs[0], int(inputs[1]), float(inputs[2])
     return inputs
-
 
 # og dataframe filters
 def F_f(df,fetch):
@@ -89,15 +87,120 @@ def pwr(z,zref,Zo):    #   u/Uref = (z/Zo)**n
 #   above 100m, decreases linearly to 0.01 at 600 m
 def TI(z,Zo):
     n=nFromZo(Zo)
-    return n*(np.log(30/Zo))/(np.log(z/Zo))
+    return n*(np.log(30/Zo))/(np.log(z/Zo))*100
 
 #%% Log functions from RP's matlab code
+# not in use (yet)
 def log(z,Zo):    #   u/Uinf = 2.5*(Ustar0/Uinf)*ln(z/Zo)
     Fr=F_ratio(Zo)
     return 2.5*Fr*np.log(z/Zo)
 
 def F_ratio(Zo):
     return np.sqrt(2.75e-3+6e-4*np.log10(Zo))
+
+#%% plotting function
+# mostly for QA
+def Profile_plot(fetch, tun):
+    
+    data=F_f(df_og,fetch)
+    
+    main=data['Main(mm)'].mean()
+    boost=data['Boost(mm)'].mean()
+    
+    block_ht=max(main,boost)*SF/1000
+    
+    data=F_t(data,tun)
+    
+    data=F_d(data,'Vertical Profile')
+    
+    data=data[data.Location.isin([
+        'Ref',
+        '-3r/2',
+        '-r/2',
+        'TTC',
+        '+r/2',        
+            ])]
+    
+    data['Z_fs']=data['Z(mm)']*SF/1000
+    
+    Z = np.linspace(block_ht,Zmax,num=100)
+    
+    #actual plotting, all above is just data manipulation/prep
+    
+    figure,ax = plt.subplots(1,2, sharey=True)
+    
+    # velocity
+    data.plot(kind='scatter', x='Uhf/Uref', y='Z_fs',ax=ax[0], marker='x', c='X(mm)', cmap=cm1, colorbar=False, label='HF')
+    data.plot(kind='scatter', x='Uomni/Uref', y='Z_fs',ax=ax[0], marker='+', c='X(mm)', cmap=cm2, colorbar=False, label='12HP')
+    
+    # turbulence
+    data.plot(kind='scatter', x='TIUhf(%)', y='Z_fs',ax=ax[1], marker='x', c='X(mm)', cmap=cm1, colorbar=False, label='HF')
+    data.plot(kind='scatter', x='TIUomni(%)', y='Z_fs',ax=ax[1], marker='+', c='X(mm)', cmap=cm2, colorbar=True, label='12HP')
+    
+    # targets
+    ax[0].plot(pwr(Z,SF,Zo_targ), Z, c='k', label='Target U')
+    ax[1].plot(TI(Z,Zo_targ), Z, c='k', label='Target TI')
+    
+    # horizontal lines
+    ax[1].axhline(y=30, color='g', linestyle='-.',label='30m FS')
+    ax[1].axhline(y=100, color='grey', linestyle='-.',label='100m FS')
+    ax[1].axhline(y=block_ht, color='b', linestyle='-.',label='Block Height')
+    
+    ax[0].axhline(y=block_ht, color='b', linestyle='-.',label='Block Height')
+    
+    
+    ax[0].legend()
+    ax[1].legend()
+    
+    
+    ax[0].set_xlabel('U/Uref')
+    ax[1].set_xlabel('T.I.  (%)')
+    ax[0].set_ylabel('Z F.S. (m)')
+    
+    ax[0].set_xlim(.2, 1.2)
+    ax[1].set_xlim(0, 50)
+    
+    plt.suptitle(tun+' - '+targets+' -'+fetch)
+    
+    #plt.show() #moved to after loop so that all lpots show at same time
+
+#%% error calculations
+
+def Calc_Error(fetch,tun):    
+    #filter for fetch and WT
+    df=F_t(F_f(df_og,fetch),tun)
+    
+    if not df.empty:
+        #trim down data set to "good" window
+        df=F_d(df,'Vertical Profile')
+        df=df[df.Location.isin([
+            #'Ref',
+            #'-3r/2',
+            '-r/2',
+            'TTC',
+            #'+r/2',        
+                ])]
+        
+        df['Z_fs']=df['Z(mm)']*SF/1000
+        
+        main=df['Main(mm)'].max()
+        boost=df['Boost(mm)'].max()
+        block_ht=max(main,boost)*SF/1000
+        
+        # limit to "good" height region
+        df=df[df['Z_fs'].between(block_ht*2,Zmax)]
+        
+        Z=df.Z_fs
+        U_targ=pwr(Z,SF,Zo_targ)
+        TI_targ=TI(Z,Zo_targ)
+        
+        #least squares method (i think)
+        U_err=sum((U_targ-df['Uhf/Uref'])**2 + (U_targ-df['Uomni/Uref'])**2)**.5
+        TI_err=sum((TI_targ-df['TIUhf(%)'])**2 + (TI_targ-df['TIUomni(%)'])**2)**.5
+        
+        return U_err, TI_err
+    
+    else: return 999, 999
 
 #%% Get file & initialize
 
@@ -116,15 +219,15 @@ if os.path.isfile(pklpath):         #check if .pkl exists already
         df_og=pd.read_pickle(pklpath)
     else:
         if os.path.isfile(filepath) is False:   #open file dialogue if .xlsx path not found
-            print('Default file not found, use GUI to select data file...')
+            print('Default file not found')
             filepath=Get_Data()
         print('Reading data file...')
         df_og = pd.read_excel(filepath, header=0)
         print('Saving dataframe...')
-        df_og.to_pickle(pklpath)                #save data to .pkl file
-else:                               #if no .pkl, try to load data
+        df_og.to_pickle(pklpath)            #save data to .pkl file
+else:                                       #if no .pkl, try to load data
     if os.path.isfile(filepath) is False:   #open file dialogue if .xlsx path not found
-        print('Default file not found, use GUI to select data file...')
+        print('Default file not found')
         filepath=Get_Data()
     print('Reading data file...')
     df_og = pd.read_excel(filepath, header=0)
@@ -134,295 +237,72 @@ else:                               #if no .pkl, try to load data
 
 # get inputs
 # add any extra gui interfaces here (tunnel, profile code, etc.)
-SF,Zo_targ=Inputs()
+tun,SF,Zo_targ=Inputs()
+targets='{}-{}'.format(SF,Zo_targ)
 
 #%% Begin real script
-t0 = datetime.datetime.now()    #start process timer
-
-# build dataframe of approaches and coef's(added later)
-results=pd.DataFrame()
-results['FetchID']=df_og['Fetch'].dropna().drop_duplicates().reset_index(drop=True)
-results['Zo']=''
-#data['{}-Zo'.format(SF)]=''   #include SF in column name
-
-
-#%% workspace for plot function
+#t0 = datetime.datetime.now()    #start process timer
 
 #set plot style 
 mpl.rcdefaults()            #reset to defaults
 styles=plt.style.available  #show plot styles
-plt.style.use(styles[17])
+plt.style.use(styles[14])
+cm1='rainbow'
+cm2=cm1
 
+Zmax=100
 
+results=pd.DataFrame()
+results['FetchID']=df_og['Fetch'].dropna().drop_duplicates().reset_index(drop=True)
 
-fetch=results['FetchID'][11]  # this will become input arg for function
+c1='{}-{}-{}'.format(tun,targets,'U')
+c2='{}-{}-{}'.format(tun,targets,'TI')
 
-data=F_f(df_og,fetch)
+results[c1]=''
+results[c2]=''
 
-main=data['Main(mm)'].mean()
-boost=data['Boost(mm)'].mean()
+print('Calculating results...')
 
-block_ht=max(main,boost)*SF/1000
-
-data=data[data.Location=='TTC']
-data=F_d(data,'Vertical Profile')
-
-data['Z_fs']=data['Z(mm)']*SF/1000
-
-Z = np.linspace(block_ht,SF,num=100)
-
-#actual plotting, all above is just data manipulation/prep
-
-figure,ax = plt.subplots(1,2, sharey=True)
-
-# velocity
-F_t(data,'GDE').plot(kind='scatter', x='Uhf/Uref', y='Z_fs',ax=ax[0], marker='x', c='r',label='GDE HF')
-F_t(data,'GDE').plot(kind='scatter', x='Uomni/Uref', y='Z_fs',ax=ax[0], marker='x', c='m',label='GDE 12HP')
-
-F_t(data,'GDW').plot(kind='scatter', x='Uhf/Uref', y='Z_fs',ax=ax[0], marker='+', c='b',label='GDW HF')
-F_t(data,'GDW').plot(kind='scatter', x='Uomni/Uref', y='Z_fs',ax=ax[0], marker='+', c='g',label='GDW 12HP')
-
-# turbulence
-F_t(data,'GDE').plot(kind='scatter', x='TIUhf(%)', y='Z_fs',ax=ax[1], marker='x', c='r',label='GDE HF')
-F_t(data,'GDE').plot(kind='scatter', x='TIUomni(%)', y='Z_fs',ax=ax[1], marker='x', c='m',label='GDE 12HP')
-
-F_t(data,'GDW').plot(kind='scatter', x='TIUhf(%)', y='Z_fs',ax=ax[1], marker='+', c='b',label='GDW HF')
-F_t(data,'GDW').plot(kind='scatter', x='TIUomni(%)', y='Z_fs',ax=ax[1], marker='+', c='g',label='GDW 12HP')
-
-# targets
-ax[0].plot(pwr(Z,SF,Zo_targ), Z, c='c')
-
-ax[1].axhline(y=30, color='g', linestyle='-.',label='30m FS')
-ax[1].axhline(y=100, color='k', linestyle='-.',label='100m FS')
-ax[1].axhline(y=block_ht, color='b', linestyle='-.',label='Block Height')
-
-ax[0].axhline(y=block_ht, color='b', linestyle='-.',label='Block Height')
-
-
-#ax[0].legend()
-ax[1].legend()
-
-
-ax[0].set_xlabel('U/Uref')
-ax[1].set_xlabel('T.I.  (%)')
-ax[0].set_ylabel('Z F.S. (m)')
-
-plt.suptitle(fetch)
-
-plt.show()
-
-
-#%% error calcs
-
-def Calc_error(fetch,tun):
-    #fetch=results['FetchID'][10]  # this will become input arg for function
-    #tun='GDW'
-    
-    #trim down data set to "good" window
-    df=F_t(F_f(df_og,fetch),tun)
-    df=F_d(df,'Vertical Profile')
-    df=df[df.Location=='TTC']
-    
-    df['Z_fs']=df['Z(mm)']*SF/1000
-    
-    main=df['Main(mm)'].max()
-    boost=df['Boost(mm)'].max()
-    block_ht=max(main,boost)*SF/1000
-    
-    # limit to "good" height region
-    df=df[df['Z_fs'].between(block_ht*1.5,100)]
-    
-    
-    Z_pwr=df.Z_fs
-    U_pwr=pwr(Z_pwr,SF,Zo_targ)
-    
-    err=sum((U_pwr-df['Uhf/Uref'])**2)**.5
-    
-    return err
-
-
-#df.plot(kind='scatter', x='Uhf/Uref', y='Z_fs',ax=ax[0], marker='x', c='r',label='GDE HF')
-
-
-#%%
 for i in results.index:
     fetch=results.FetchID[i]
-    tun='GDE'
-    results.Zo.loc[i]=Calc_error(fetch,tun)
-
-
-
-#%% old code for reference
-#%%
-#Fit functions
+    results[c1].loc[i],results[c2].loc[i]=Calc_Error(fetch,tun)
     
-# =============================================================================
-# def fit(df,func,independantkw,dependantkw):
-#     f=pd.DataFrame()
-#     f['xval']=df[independantkw]*SF      #Z(mm) MS 
-#     f['yval']=df[dependantkw]           #U/Uref
-#     #f=f.sort_values(by='xval')
-#     #f=f.sort_values(by='yval')
-#     coef, pcov = opt.curve_fit(func, f['xval'], f['yval']);
-#     err = np.sqrt(np.diag(pcov))
-#     return f, coef, err
-# 
-# def pwr(z,zref,Zo):    #   u/Uref = (z/Zo)**n
-#     n=nFromZo(Zo)
-#     return (z/zref)**n
-# 
-# def log(z,Zo):    #   u/Uinf = 2.5*(Ustar0/Uinf)*ln(z/Zo)
-#     #u=u.astype(float) # do this outside of function
-#     Fratio=F_ratio(Zo)
-#     return 2.5*Fratio*np.log(z/Zo)
-# 
-# def free_pwr(z,Zo,n):    #   u/Uinf = (z/Zo)**n
-#     return (z/Zo)**n
-# 
-# def free_log(z,Fratio,Zo):    #   u/Uinf = 2.5*(Ustar0/Uinf)*ln(z/Zo)
-#     #u=u.astype(float) # do this outside of function
-#     return 2.5*Fratio*np.log(z/Zo)
-# 
-# def F_ratio(Zo):
-#     return np.sqrt(2.75e-3+6e-4*np.log10(Zo))
-#     
-# def nFromZo(Zo):
-#     return 0.096*np.log10(Zo)+0.016*(np.log10(Zo)**2)+.24
-# =============================================================================
+results['Score']=(results[c1]**2+results[c2]**2)**.5
 
-#%% Iterate
+best_score=results.Score.min()
+best_index=results.index[results.Score==best_score][0]
+best_fetch=results.FetchID[best_index]
+
+ranked_U=results.sort_values(by=[c1]).copy().reset_index(drop=True)
+top_U=ranked_U.FetchID[0:3]
+
+print('Generating plots...')
+
+for i in top_U:
+    Profile_plot(i, tun)
     
-# =============================================================================
-# for i in data['Fetch ID']:      #iterate through list of fetch IDs (placeholder)
-#     print (i)
-# =============================================================================
+ranked_TI=results.sort_values(by=[c2]).copy().reset_index(drop=True)
+top_TI=ranked_TI.FetchID[0:3]
 
-
-#%% single plot
-# turn this into a function after it works    
+for i in top_TI:
+    Profile_plot(i, tun)
     
-# =============================================================================
-# mpl.rcdefaults()           #reset to defaults
-# styles=plt.style.available  #show plot styles
-# plt.style.use(styles[5])
-# =============================================================================
-# =============================================================================
-# 
-# fetch=data['Fetch ID'][11]  # this will become input arg for function
-# 
-# 
-# #read strings
-# # =============================================================================
-# # def left(s, amount):
-# #     return s[:amount]
-# # 
-# # def right(s, amount):
-# #     return s[-amount:]
-# # =============================================================================
-# 
-# def mid(s, offset, amount):
-#     return s[offset:offset+amount]
-# 
-# #FS/MS calculations
-# 
-# #block height    
-# Mindex=fetch.find('M-')
-# Bindex=fetch.find('B-')
-# TTindex=fetch.find('TT')
-# 
-# main=int(mid(fetch,Mindex+2,Bindex-Mindex-2))
-# boost=int(mid(fetch,Bindex+2,TTindex-Bindex-2))
-# 
-# ##
-# f=fetchfilter(df_og,fetch)
-# 
-# f1=pd.DataFrame()
-# f1['Z_n']=f['Z(mm)']/1000
-# f=f.join(f1)
-# 
-# v=directionfilter(f,'Vertical Profile')
-# #v=f
-# vE=tunnelfilter(v,'GDE')
-# vW=tunnelfilter(v,'GDW')
-# 
-# h=directionfilter(f,'Lateral Profile')
-# hE=tunnelfilter(h,'GDE')
-# hW=tunnelfilter(h,'GDW')
-# =============================================================================
+ranked_score=results.sort_values(by=['Score']).copy().reset_index(drop=True)
+top=ranked_score.FetchID[0:3]
 
-#fits
+for i in top:
+    Profile_plot(i, tun)
 
-# =============================================================================
-# Uref=np.mean(vE['Uref(m/s)'])
-# SF=180
-# =============================================================================
+#t1=datetime.datetime.now()
 
-# =============================================================================
-# f0,coef0,err0=fit(vE,free_pwr,'Z(mm)','Uhf/Uref')
-# f01,coef01,err01=fit(vE,free_log,'Z(mm)','Uhf/Uref')
-# 
-# f02,coef02,err02=fit(vE,pwr,'Z(mm)','Uhf/Uref')
-# f03,coef03,err03=fit(vE,log,'Z(mm)','Uhf/Uref')
-# =============================================================================
-
-
-#actual plotting, all above is just data manipulation
-# =============================================================================
-# 
-# figure,ax = plt.subplots(1,2, sharey=True)
-# 
-# 
-# # velocity
-# vE.plot(kind='scatter', x='Uhf/Uref', y='Z_n',ax=ax[0], marker='.', c='b',label='GDE HF')
-# vW.plot(kind='scatter', x='Uhf/Uref', y='Z_n',ax=ax[0], marker='.', c='r',label='GDW HF')
-# 
-# 
-# # TI
-# vE.plot(kind='scatter', x='TIUhf(%)', y='Z_n', ax=ax[1], marker='.', c='b',label='GDE HF')
-# vW.plot(kind='scatter', x='TIUhf(%)', y='Z_n', ax=ax[1], marker='.', c='r',label='GDW HF')
-# 
-# 
-# #fits
-# 
-# 
-# z_pwr=np.linspace(.01,1.2,num=1000)
-# 
-# ax[0].plot(pwr(z_pwr,1,Zo_targ), z_pwr,  c='m', label='target pwr')
-# 
-# #refspeed=log(SF,Zo_targ)
-# 
-# #ax[0].plot(log(z_in,Zo_targ), z_in/SF,  c='c', label='target log')
-# 
-# # =============================================================================
-# # ax[0].plot(log(z_in,Zo_targ*2), z_in/SF,  c='b', label='target log*2')
-# # ax[0].plot(log(z_in,Zo_targ*.5), z_in/SF,  c='m', label='target log/2')
-# # =============================================================================
-# 
-# # =============================================================================
-# # ax[0].plot(free_pwr(z_in,*coef0), z_in,  c='g', label='free pwr')
-# # ax[0].plot(free_log(z_in,*coef01), z_in, c='y', label='free log')
-# # 
-# # ax[0].plot(pwr(z_in,*coef02), z_in,  c='g', label='pwr')
-# # ax[0].plot(log(z_in,*coef03), z_in, c='y', label='log')
-# # =============================================================================
-# 
-# 
-# ax[0].legend()
-# ax[1].legend()
-# 
-# 
-# ax[0].set_xlabel('U/Uref')
-# ax[1].set_xlabel('T.I.')
-# ax[0].set_ylabel('Z/Zref')
-# 
-# plt.suptitle(fetch)
-# 
-# plt.show()
-# =============================================================================
+print('Done! Close all plot windows to exit')
+plt.show()
 
 #%% Done
-print('Done!')
-t1=datetime.datetime.now()
-dt= t1-t0
-dt=dt.seconds
-easygui.msgbox(msg="Done!\n Process took: {} seconds".format(dt))  
+# =============================================================================
+# print('Done!')
+# #t1=datetime.datetime.now()
+# dt= t1-t0
+# dt=dt.seconds
+# easygui.msgbox(msg="Done!\n Process took: {} seconds".format(dt))  
+# =============================================================================
