@@ -91,12 +91,20 @@ def TI(z,Zo):
 
 #%% Log functions from RP's matlab code
 # not in use (yet)
-def log(z,Zo):    #   u/Uinf = 2.5*(Ustar0/Uinf)*ln(z/Zo)
+def old_log(z,Zo):    #   u/Uinf = 2.5*(Ustar0/Uinf)*ln(z/Zo)
     Fr=F_ratio(Zo)
     return 2.5*Fr*np.log(z/Zo)
 
 def F_ratio(Zo):
     return np.sqrt(2.75e-3+6e-4*np.log10(Zo))
+
+#new log law from wikipedia
+#Holmes JD. Wind Loading of Structures. 3rd ed. Boca Raton, Florida: CRC Press; 2015.
+def log(z,zref,Zo,d):
+    #d=? # zero-plane displacement:
+         # height in meters above the ground at which zero wind speed is 
+         # achieved as a result of flow obstacles such as trees or buildings
+    return np.log((z-d)/Zo)/np.log((zref-d)/Zo)
 
 #%% plotting function
 # mostly for QA
@@ -104,13 +112,17 @@ def Profile_plot(fetch, tun):
     
     data=F_f(df_og,fetch)
     
+    data['Z_fs']=data['Z(mm)']*SF/1000
+    
     main=data['Main(mm)'].mean()
     boost=data['Boost(mm)'].mean()
     
     block_ht=max(main,boost)*SF/1000
+    block_avg=(main+boost)*SF/(2*1000)
     
     data=F_t(data,tun)
     
+    horiz=F_d(data,'Lateral Profile')
     data=F_d(data,'Vertical Profile')
     
     data=data[data.Location.isin([
@@ -120,8 +132,6 @@ def Profile_plot(fetch, tun):
         'TTC',
         '+r/2',        
             ])]
-    
-    data['Z_fs']=data['Z(mm)']*SF/1000
     
     Z = np.linspace(block_ht,Zmax,num=100)
     
@@ -138,7 +148,18 @@ def Profile_plot(fetch, tun):
     data.plot(kind='scatter', x='TIUomni(%)', y='Z_fs',ax=ax[1], marker='+', c='X(mm)', cmap=cm2, colorbar=True, label='12HP')
     
     # targets
-    ax[0].plot(pwr(Z,SF,Zo_targ), Z, c='k', label='Target U')
+    ax[0].plot(pwr(Z,SF,Zo_targ), Z, c='k', label='Target U (pwr)')
+    
+    ax[0].plot(log(Z,SF,Zo_targ,2*block_avg/3), Z, c='m', label='Target U (log d=2/3 block avg.)')
+    
+    a=2
+    ax[0].plot(log(Z,SF,Zo_targ,a*Zo_targ), Z, c='c', label='Target U (log d={}*Zo)'.format(a))
+    
+    
+    #ax[0].plot(new_log(Z,SF,Zo_targ,0.25*block_ht), Z, c='c', label='Target U (log d=0.25 block ht.)')
+    #d=2
+    #ax[0].plot(new_log(Z,SF,Zo_targ,d), Z, c='b', label='Target U (log d={} m)'.format(d))
+    
     ax[1].plot(TI(Z,Zo_targ), Z, c='k', label='Target TI')
     
     # horizontal lines
@@ -162,7 +183,7 @@ def Profile_plot(fetch, tun):
     
     plt.suptitle(tun+' - '+targets+' -'+fetch)
     
-    #plt.show() #moved to after loop so that all lpots show at same time
+    #plt.show() #moved to after loop so that all plots show at same time
 
 #%% error calculations
 
@@ -188,19 +209,21 @@ def Calc_Error(fetch,tun):
         block_ht=max(main,boost)*SF/1000
         
         # limit to "good" height region
-        df=df[df['Z_fs'].between(block_ht*2,Zmax)]
+        df=df[df['Z_fs'].between(block_ht,Zmax)]
         
         Z=df.Z_fs
-        U_targ=pwr(Z,SF,Zo_targ)
+        U_pwr=pwr(Z,SF,Zo_targ)
+        U_log=log(Z,SF,Zo_targ,Zo_targ*2)
         TI_targ=TI(Z,Zo_targ)
         
         #least squares method (i think)
-        U_err=sum((U_targ-df['Uhf/Uref'])**2 + (U_targ-df['Uomni/Uref'])**2)**.5
+        U_pwr_err=sum((U_pwr-df['Uhf/Uref'])**2 + (U_pwr-df['Uomni/Uref'])**2)**.5
+        U_log_err=sum((U_log-df['Uhf/Uref'])**2 + (U_log-df['Uomni/Uref'])**2)**.5
         TI_err=sum((TI_targ-df['TIUhf(%)'])**2 + (TI_targ-df['TIUomni(%)'])**2)**.5
         
-        return U_err, TI_err
+        return U_pwr_err, U_log_err, TI_err
     
-    else: return 999, 999
+    else: return 999, 999, 999
 
 #%% Get file & initialize
 
@@ -255,23 +278,29 @@ Zmax=100
 results=pd.DataFrame()
 results['FetchID']=df_og['Fetch'].dropna().drop_duplicates().reset_index(drop=True)
 
-c1='{}-{}-{}'.format(tun,targets,'U')
-c2='{}-{}-{}'.format(tun,targets,'TI')
+c1='{}-{}-{}'.format(tun,targets,'U_pwr')
+c2='{}-{}-{}'.format(tun,targets,'U_log')
+c3='{}-{}-{}'.format(tun,targets,'TI')
 
 results[c1]=''
 results[c2]=''
+results[c3]=''
 
 print('Calculating results...')
 
 for i in results.index:
     fetch=results.FetchID[i]
-    results[c1].loc[i],results[c2].loc[i]=Calc_Error(fetch,tun)
+    results[c1].loc[i],results[c2].loc[i],results[c3].loc[i]=Calc_Error(fetch,tun)
     
-results['Score']=(results[c1]**2+results[c2]**2)**.5
+results['Score']=(results[c1]**2+results[c2]**2+results[c3]**2)**.5
 
-best_score=results.Score.min()
-best_index=results.index[results.Score==best_score][0]
-best_fetch=results.FetchID[best_index]
+
+#%% plot results
+# =============================================================================
+# best_score=results.Score.min()
+# best_index=results.index[results.Score==best_score][0]
+# best_fetch=results.FetchID[best_index]
+# =============================================================================
 
 ranked_U=results.sort_values(by=[c1]).copy().reset_index(drop=True)
 top_U=ranked_U.FetchID[0:3]
