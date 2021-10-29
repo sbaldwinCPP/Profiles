@@ -436,7 +436,7 @@ for i in results.index:
     fetch=results.FetchID[i]
     results[c1].loc[i],results[c2].loc[i],results[c3].loc[i]=Calc_Error(fetch,tun)
     
-results['Score']=(results[c1]*results[c2]*results[c3])
+results['Score']=(results[c1]*results[c2]*results[c3]**2)
 
 inidir=os.getcwd()
 Results_Folder=os.path.join(inidir,'Results')
@@ -487,12 +487,13 @@ for i in range(n):
     label='Best overall #{}'.format(i+1)
     Profile_plot(f, tun, label)
 
-#print('Done! Close all plot windows to exit')
+t1=datetime.datetime.now()
+print('Close all plot windows to continue...')
 #plt.show()          #shows all plots at once, holds until closed
 
 #%% Done
 print('Done!')
-t1=datetime.datetime.now()
+
 dt= t1-t0
 dt=dt.seconds
 easygui.msgbox(msg="Done!\n Process took: {} seconds".format(dt))  
