@@ -20,7 +20,6 @@ try:
     import matplotlib.pyplot as plt
     import matplotlib as mpl
     
-    
     print('All modules imported')
 
 except ModuleNotFoundError as err:
@@ -73,59 +72,115 @@ def F_d(df,D):
 
 #%% functions from CPP AQ Handbook and ADC report
 
-#   velocity equations
-#   from Counihan (1975)
-def nFromZo(Zo):    
-    return 0.096*np.log10(Zo)+0.016*(np.log10(Zo)**2)+.24
-
+#   Power Law
+#   ADC report - equation B.3
+#   Also equation 21 in CPP Handbook
 def pwr(z,zref,Zo):    #   u/Uref = (z/Zo)**n
     n=nFromZo(Zo)
     return (z/zref)**n
 
+#   Exponent calculation from Zo
+#   ADC report - equation B.4 (from Counihan, 1975)
+#   Also equation 22 in CPP handbook
+def nFromZo(Zo):    
+    return 0.24 + 0.096*np.log10(Zo) + 0.016*(np.log10(Zo)**2)
+
 #   turbulence equation
-#   EPA (1981)
+#   CPP handbook - equation 23 (from EPA, 1981)
 #   valid between 5 and 100 m
-#   above 100m, decreases linearly to 0.01 at 600 m
 def TI(z,Zo):
     n=nFromZo(Zo)
     return n*(np.log(30/Zo))/(np.log(z/Zo))*100
 
-#%% Log functions from RP's matlab code
-# not in use, does not provide a good fit to any data
-def old_log(z,Zo):    #   u/Uinf = 2.5*(Ustar0/Uinf)*ln(z/Zo)
-    Fr=F_ratio(Zo)
-    return 2.5*Fr*np.log(z/Zo)
+#   Log Law
+#   ADC report - equation B.1
+def log_ADC(z,Zo):      #   U/Uinf = 2.5*(UstarZero/Uinf)*ln(z/Zo)
+    FR=F_ratio(Zo)      #   (UstarZero/Uinf)
+    return 2.5*FR*np.log(z/Zo)
 
+#   Friction Velocity Ratio
+#   ADC report - equation B.2
 def F_ratio(Zo):
     return np.sqrt(2.75e-3+6e-4*np.log10(Zo))
 
-###     Also found this in the .txt copy of RP code
-# =============================================================================
-# LogLaw=@(zo,z)((sqrt(2.75*10^-3+6*10^-4*log10(zo))*...
-#     (600/SF)^(0.24+0.096*log10(zo)+0.016*log10(zo)^2)*Uref)/0.41*log(z/zo));
-# =============================================================================
+#%%
+#   Log Law from excel example
+def Ustar_xl(Zo,Zref,Uref):
+    #=SQRT(0.00275+0.0006*LOG(O44))*(600/F38)^O41*VLOOKUP($F$37,$A$16:$I$36,9)
+    n=nFromZo(Zo)
+    return np.sqrt(0.00275+0.0006*np.log10(Zo))*(600/Zref)**n*Uref
+
+def Log_xl(z,Zo,Uref,Ustar):
+    #=IF(E16<>"",($O$42/0.4*(LN(D16)-LN($O$44)))/VLOOKUP($F$37,$A$16:$I$36,9),NA())
+    return (Ustar/0.4*(np.log(z)-np.log(Zo)))/Uref
+    
+def TI_xl(z,Zo):
+    #=IF(E16<>"",IF(D16<100,O$41*LN(30/(O$44))/(LN((E16/100*$E$3)/O$44)),($O$41*LN(30/$O$44)/LN(100/$O$44)+(D16-100)/500*(0.01-$O$41*LN(30/$O$44)/LN(100/$O$44)))),NA())
+    n=n=nFromZo(Zo)
+    try:
+        t1=n*np.log(30/Zo)/np.log(z[z<100]/Zo)
+        t2=n*(np.log(30/Zo))/np.log(100/Zo)+(z[z>=100]-100)/500*(0.01-n*np.log(30/Zo)/np.log(100/Zo))
+        t=np.append(t1,t2)
+    except:
+        if z < 100:
+            t=n*np.log(30/Zo)/np.log(z/Zo)
+        else: 
+            t=n*(np.log(30/Zo))/np.log(100/Zo)+(z-100)/500*(0.01-n*np.log(30/Zo)/np.log(100/Zo))
+    return t*100
+    
+#%% log law from wikipedia
 
 # =============================================================================
+# #   Holmes JD. Wind Loading of Structures. 3rd ed. Boca Raton, Florida: CRC Press; 2015.
+# def log_w(z,zref,Zo):
+#     #d=  # zero-plane displacement:
+#          # height in meters above the ground at which zero wind speed is 
+#          # achieved as a result of flow obstacles such as trees or buildings
+#     d=0
+#     return np.log((z-d)/Zo)/np.log((zref-d)/Zo)
+# 
+# def Ustar_over_Uref(Zref,Zo): 
+#     #adapted from U(z)=(u*/k)*ln((z-d)/Zo)
+#     k=0.41
+#     d=0
+#     return k/np.log((Zref-d)/Zo)
+# 
+# def Ustar(u1,u2,z1,z2):
+#     k=0.41
+#     d=0
+#     return k*(u2-u1)/np.log((z2-d)/(z1-d))
+# =============================================================================
+
+
+#%%   Log functions from RP's matlab code
+
+# =============================================================================
+# 
+# #   not in use, does not provide a good fit to any data
+# def old_log(z,Zo):    #   u/Uinf = 2.5*(Ustar0/Uinf)*ln(z/Zo)
+#     Fr=F_ratio(Zo)
+#     return 2.5*Fr*np.log(z/Zo)
+# 
+# def F_ratio(Zo):
+#     return np.sqrt(2.75e-3+6e-4*np.log10(Zo))
+# 
+# # =============================================================================
+# #   ###     Also found this in the .txt copy of RP code
+# #   #LogLaw=@(zo,z)((sqrt(2.75*10^-3+6*10^-4*log10(zo))*...
+# #           #(600/SF)^(0.24+0.096*log10(zo)+0.016*log10(zo)^2)*Uref)/0.41*log(z/zo));
+# # =============================================================================
+# 
 # def sqrt(x):
 #     return x**.5
 # 
 # def log_law(z,zo,Uref):
 #     return sqrt(2.75e-3+6e-4*np.log10(zo))*(600/SF)**(0.24+0.096*np.log10(zo)+0.016*np.log10(zo)**2)*Uref/0.41*np.log(z/zo)
-# 
 # =============================================================================
 
 
-#%% new log law from wikipedia
-#Holmes JD. Wind Loading of Structures. 3rd ed. Boca Raton, Florida: CRC Press; 2015.
-def log(z,zref,Zo,d):
-    #d=  # zero-plane displacement:
-         # height in meters above the ground at which zero wind speed is 
-         # achieved as a result of flow obstacles such as trees or buildings
-    return np.log((z-d)/Zo)/np.log((zref-d)/Zo)
-
 #%% plotting function
-# mostly for QA
-def Profile_plot(fetch, tun):
+#   mostly for QA
+def Profile_plot(fetch, tun, label=''):
     
     data=F_f(df_og,fetch)
     
@@ -133,15 +188,16 @@ def Profile_plot(fetch, tun):
     
     main=data['Main(mm)'].mean()
     boost=data['Boost(mm)'].mean()
+    t1=data['T1(mm)'].mean()
+    t2=data['T2(mm)'].mean()
+    s1=data['S1(mm)'].mean()
+    s2=data['S2(mm)'].mean()
     
-    #block_ht=max(main,boost)*SF/1000
-    block_ht=min(main,boost)*SF/1000
-    #block_avg=(main+boost)*SF/(2*1000)
+    block_ht=max(main,boost)*SF/1000
+    trip_ht=max(t1,t2)*SF/1000
+    spire_ht=max(s1,s2)*SF/1000
     
     data=F_t(data,tun)
-    
-    horiz=F_d(data,'Lateral Profile')
-    data=F_d(data,'Vertical Profile')
     
     data=data[data.Location.isin([
         'Ref',
@@ -151,45 +207,95 @@ def Profile_plot(fetch, tun):
         '+r/2',        
             ])]
     
-    Z = np.linspace(block_ht,Zmax,num=100)
-    #Uref = data['Uref(m/s)'].mean()
+    #sort by abs distance from TT center, show most centered points on top of plot
+    data['abs_x']=abs(data['X(mm)'])
+    data=data.sort_values('abs_x', ascending=False)
     
-    #actual plotting, all above is just data manipulation/prep
+    horiz=F_d(data,'Lateral Profile')
+    data=F_d(data,'Vertical Profile')
+
+    z = np.linspace(1,SF*1.2,num=1000)
+
+    #### actual plotting, all above is just data manipulation/prep
     
-    figure,ax = plt.subplots(1,2, sharey=True)
+    figure,ax = plt.subplots(1,2, sharey=True, figsize=(11,7))
     
-    # velocity
-    data.plot(kind='scatter', x='Uhf/Uref', y='Z_fs',ax=ax[0], marker='x', c='X(mm)', cmap=cm1, colorbar=False, label='HF')
-    data.plot(kind='scatter', x='Uomni/Uref', y='Z_fs',ax=ax[0], marker='+', c='X(mm)', cmap=cm2, colorbar=False, label='12HP')
-    
-    # turbulence
-    data.plot(kind='scatter', x='TIUhf(%)', y='Z_fs',ax=ax[1], marker='x', c='X(mm)', cmap=cm1, colorbar=False, label='HF')
-    data.plot(kind='scatter', x='TIUomni(%)', y='Z_fs',ax=ax[1], marker='+', c='X(mm)', cmap=cm2, colorbar=True, label='12HP')
-    
-    # targets
+    # target U pwr - ADC
     n=nFromZo(Zo_targ)
-    ax[0].plot(pwr(Z,SF,Zo_targ), Z, c='c', label='Target U (pwr, n={})'.format(round(n,2)))
-    ax[1].plot(TI(Z,Zo_targ), Z, c='m', label='Target TI')
+    ax[0].plot(pwr(z,SF,Zo_targ), z , c='grey', label='Target Power, n={})'.format(round(n,2)))
     
-    ###     maybe add routine to optimize d for the dataset
-    #d=3*Zo_targ
-    d=0
-    ax[0].plot(log(Z,SF,Zo_targ,d), Z, c='m', label='Target U (log, d={})'.format(round(d,2)))
+    # target U log - EXCEL Example
+    Uref = data['Uref(m/s)'].mean()
+    Us = Ustar_xl(Zo_targ,SF,Uref)
+    ax[0].plot(Log_xl(z,Zo_targ,Uref,Us), z, c='grey', linestyle='-.', label='Target Log, U*={}'.format(round(Us,2)))
+    
+    # target TI - EXCEL Example
+    ax[1].plot(TI_xl(z,Zo_targ), z, c='grey', linestyle='--', label='Target TI')
+    
+    # horizontal profile setup
+    horiz['Z_fsr']=round(horiz['Z_fs'],-1)
+    hts=horiz['Z_fsr'].drop_duplicates()
+    horiz['hf_avg']=''
+    horiz['omni_avg']=''
+    ps=SF*.75 # scalar to magnify percent variation
+    
+###   single horizontal profile
+    h = min(hts, key=lambda x:abs(x-100)) #finds value in hts closest to 100
+    mean_hf=horiz[horiz['Z_fsr']==h]['Uhf/Uref'].mean()
+    mean_omni=horiz[horiz['Z_fsr']==h]['Uomni/Uref'].mean()
+    mean_combo=(mean_omni+mean_hf)/2
+    horiz.loc[horiz['Z_fsr']==h, 'hf_avg']=mean_hf
+    horiz.loc[horiz['Z_fsr']==h, 'omni_avg']=mean_omni
+    horiz.loc[horiz['Z_fsr']==h, 'combo_avg']=mean_combo
+    
+    ax[0].axhline(y=(h+ps*.05), color='grey', linestyle='--', xmax=0.4)
+    ax[0].axhline(y=(h-ps*.05), color='grey', linestyle='--', xmax=0.4)
+###
 
-    #ax[0].plot(old_log(Z,Zo_targ), Z, c='c', label='Target U RP')
- 
-
-    # horizontal lines
+    #enable to plot all horizontal profiles, messy for some data sets
+# =============================================================================
+#     for h in hts:
+#         mean_hf=horiz[horiz['Z_fsr']==h]['Uhf/Uref'].mean()
+#         mean_omni=horiz[horiz['Z_fsr']==h]['Uomni/Uref'].mean()
+#         mean_combo=(mean_omni+mean_hf)/2
+#         horiz.loc[horiz['Z_fsr']==h, 'hf_avg']=mean_hf
+#         horiz.loc[horiz['Z_fsr']==h, 'omni_avg']=mean_omni
+#         horiz.loc[horiz['Z_fsr']==h, 'combo_avg']=mean_combo
+#         
+#         ax[0].axhline(y=(h+ps*.05), color='grey', linestyle='--', xmax=0.4)
+#         ax[0].axhline(y=(h-ps*.05), color='grey', linestyle='--', xmax=0.4)
+# =============================================================================
+    
+    # just for single label, plots way off screen
+    ax[0].axhline(y=3*SF, color='grey', linestyle='--', label='+- 5% bounds')
+    
+    # horizontal lines for FS heights and tunnel setup
     ax[1].axhline(y=30, color='g', linestyle='-.',label='30m FS')
     ax[1].axhline(y=100, color='grey', linestyle='-.',label='100m FS')
-    ax[1].axhline(y=block_ht, color='b', linestyle='-.',label='Block Height')
+    ax[1].axhline(y=block_ht, color='b', linestyle='--',label='Block, Trip, Spire Heights')
+    ax[1].axhline(y=trip_ht, color='b', linestyle='--')
+    ax[1].axhline(y=spire_ht, color='b', linestyle='--')
     
-    ax[0].axhline(y=block_ht, color='b', linestyle='-.',label='Block Height')
+    # velocity data
+    data.plot(kind='scatter', x='Uhf/Uref', y='Z_fs',ax=ax[0], marker='x', c='X(mm)', cmap=cm, colorbar=False, label='HF')
+    data.plot(kind='scatter', x='Uomni/Uref', y='Z_fs',ax=ax[0], marker='+', c='X(mm)', cmap=cm, colorbar=False, label='12HP')
     
+    # turbulence data
+    data.plot(kind='scatter', x='TIUhf(%)', y='Z_fs',ax=ax[1], marker='x', c='X(mm)', cmap=cm, colorbar=False)
+    data.plot(kind='scatter', x='TIUomni(%)', y='Z_fs',ax=ax[1], marker='+', c='X(mm)', cmap=cm, colorbar=True)
+
+    # horizontal profile plots
+    horiz['HFxvar']=0.3*horiz['Yhf(mm)']/horiz['Yhf(mm)'].max()+0.3    # normalize y position to go from 0 to .6
+    horiz['Omnixvar']=0.3*horiz['Yomni(mm)']/horiz['Yomni(mm)'].max()+0.3
+    
+    horiz['HFyvar']=horiz['Z_fsr']+ps*(horiz['Uhf/Uref']-horiz['combo_avg'])/horiz['combo_avg'] 
+    horiz['Omniyvar']=horiz['Z_fsr']+ps*(horiz['Uomni/Uref']-horiz['combo_avg'])/horiz['combo_avg']  
+    
+    horiz.plot(kind='scatter', x='HFxvar', y='HFyvar',ax=ax[0], marker='x', c='X(mm)', cmap=cm, colorbar=False)
+    horiz.plot(kind='scatter', x='Omnixvar', y='Omniyvar',ax=ax[0], marker='+', c='X(mm)', cmap=cm, colorbar=False)
     
     ax[0].legend()
     ax[1].legend()
-    
     
     ax[0].set_xlabel('U/Uref')
     ax[1].set_xlabel('T.I.  (%)')
@@ -202,9 +308,14 @@ def Profile_plot(fetch, tun):
     
     ID=results[results.FetchID==fetch].index[0]
     
-    plt.suptitle('{}:{} \n ID#{}:{}'.format( tun, targets, ID, fetch))
+    plt.suptitle('{}:{} \n ID#{}:{} \n {}'.format(tun, targets, ID, fetch, label))
     
-    #plt.show() #moved to after loop so that all plots show at same time
+
+    Plots_Folder=os.path.join(inidir,'Plots')
+    if not os.path.exists(Plots_Folder): os.makedirs(Plots_Folder)
+    Plot_Path=os.path.join(Plots_Folder,'{}_{}_{}.png'.format(tun,targets,label))
+    plt.savefig(Plot_Path)
+    plt.close()
 
 #%% error calculations
 
@@ -212,49 +323,60 @@ def Calc_Error(fetch,tun):
     #filter for fetch and WT
     df=F_t(F_f(df_og,fetch),tun)
     
+    #trim down data set to "good" window
+    df=F_d(df,'Vertical Profile')
+    df=df[df.Location.isin([
+                            #'Ref',
+                            #'-3r/2',
+                            '-r/2',
+                            'TTC',
+                            #'+r/2',        
+                                ])]
+    
     if not df.empty:
-        #trim down data set to "good" window
-        df=F_d(df,'Vertical Profile')
-        df=df[df.Location.isin([
-            #'Ref',
-            #'-3r/2',
-            '-r/2',
-            'TTC',
-            #'+r/2',        
-                ])]
-        
         df['Z_fs']=df['Z(mm)']*SF/1000
         
-        main=df['Main(mm)'].max()
-        boost=df['Boost(mm)'].max()
-        #block_ht=max(main,boost)*SF/1000
-        block_ht=min(main,boost)*SF/1000
+        # limit to "good" height region for each law
+        # TI uses the pwr range
+        # need to check if its worth the effort/complexity
+        df_pwr=df[df['Z_fs'].between(20,SF)]
+        df_log=df[df['Z_fs'].between(5,100)]
         
-        # limit to "good" height region
-        df=df[df['Z_fs'].between(block_ht,Zmax)]
-        
-        Z=df.Z_fs
-        #d=3*Zo_targ
-        d=0
+        Z_pwr=df_pwr.Z_fs
+        Z_log=df_log.Z_fs
+        n_pwr=len(Z_pwr)
+        n_log=len(Z_log)
 
-        U_pwr=pwr(Z,SF,Zo_targ)
-        U_log=log(Z,SF,Zo_targ,d)
-        TI_targ=TI(Z,Zo_targ)
+        U_pwr=pwr(Z_pwr,SF,Zo_targ)
         
-        uhf=df['Uhf/Uref']
-        uomni=df['Uomni/Uref']
-        ucombo=(uhf+uomni)/2
+        Uref = df_log['Uref(m/s)'].mean()
+        Us = Ustar_xl(Zo_targ,SF,Uref)        
+        U_log=Log_xl(Z_log,Zo_targ,Uref,Us)
         
-        TIhf=df['TIUhf(%)']
-        TIomni=df['TIUomni(%)']
-        TIcombo=(TIhf+TIomni)/2
+        TI_targ=TI_xl(Z_pwr,Zo_targ)
         
-        #least squares method (i think)
-        U_pwr_err=sum((U_pwr-ucombo)**2)**.5
-        U_log_err=sum((U_log-ucombo)**2)**.5
-        TI_err=sum((TI_targ-TIcombo)**2)**.5
+        uhf_pwr=df_pwr['Uhf/Uref']
+        uomni_pwr=df_pwr['Uomni/Uref']
+        Uavg_pwr=(uhf_pwr+uomni_pwr)/2
         
-        return U_pwr_err, U_log_err, TI_err
+        uhf_log=df_log['Uhf/Uref']
+        uomni_log=df_log['Uomni/Uref']
+        Uavg_log=(uhf_log+uomni_log)/2
+        
+        TIhf=df_pwr['TIUhf(%)']
+        TIomni=df_pwr['TIUomni(%)']
+        TIavg=(TIhf+TIomni)/2
+        
+        #calculate average error     
+        U_pwr_err=abs(U_pwr-Uavg_pwr)
+        U_log_err=abs(U_log-Uavg_log)
+        TI_err=abs(TI_targ-TIavg)
+        
+        U_pwr_err_avg=U_pwr_err.mean()
+        U_log_err_avg=U_log_err.mean()
+        TI_err_avg=TI_err.mean()
+        
+        return U_pwr_err_avg, U_log_err_avg, TI_err_avg
     
     else: return 999, 999, 999
 
@@ -289,17 +411,13 @@ else:                                       #if no .pkl, try to load data
     df_og = pd.read_excel(filepath, header=0)
     print('Saving dataframe...')
     df_og.to_pickle(pklpath)
-    
 
-# get inputs
-# add any extra gui interfaces here (tunnel, profile code, etc.)
+# get inputs, in future may turn into an array of values to loop thru
 tun,SF,Zo_targ=Inputs()
 targets='{}-{}'.format(SF,Zo_targ)
 
 #%% Begin real script
-#t0 = datetime.datetime.now()    #start process timer
-
-Zmax=100
+t0 = datetime.datetime.now()    #start process timer
 
 results=pd.DataFrame()
 results['FetchID']=df_og['Fetch'].dropna().drop_duplicates().reset_index(drop=True)
@@ -318,138 +436,63 @@ for i in results.index:
     fetch=results.FetchID[i]
     results[c1].loc[i],results[c2].loc[i],results[c3].loc[i]=Calc_Error(fetch,tun)
     
-results['Score']=(results[c2]*results[c3])
+results['Score']=(results[c1]*results[c2]*results[c3])
 
+inidir=os.getcwd()
+Results_Folder=os.path.join(inidir,'Results')
+Results_Path=os.path.join(Results_Folder,'{}_{}_results.csv'.format(tun,targets))
+if not os.path.exists(Results_Folder): os.makedirs(Results_Folder)
+
+results.to_csv(Results_Path)
 
 #%% plot results
+#fetch=results.FetchID[10]  #for manual fetch selection
 
 #set plot style 
 mpl.rcdefaults()            #reset to defaults
-styles=plt.style.available  #show plot styles
-plt.style.use(styles[4])
-cm1='coolwarm'
-cm2=cm1
-
-
-best_score=results.Score.min()
-best_index=results.index[results.Score==best_score][0]
-best_fetch=results.FetchID[best_index]
+styles=plt.style.available  #save all plot styles to  list
+plt.style.use(styles[14])   #set style
+cm='twilight'               #set colormap
+#cm='twilight_shifted'      #if plot style has dark background
 
 print('Generating plots...')
 
-# =============================================================================
-# ranked_1=results.sort_values(by=[c1]).copy().reset_index(drop=True)
-# top_1=ranked_1.FetchID[0:3]
-# for i in top_1:
-#     Profile_plot(i, tun)
-# =============================================================================
+n=3 #number of plots per set
+
+ranked_pwr=results.sort_values(by=[c1]).copy().reset_index(drop=True)
+top_pwr=ranked_pwr.FetchID[0:n]
+for i in range(n):
+    f=top_pwr[i]
+    label='Best Power Law fit #{}'.format(i+1)
+    Profile_plot(f, tun, label)
     
-ranked_2=results.sort_values(by=[c2]).copy().reset_index(drop=True)
-top_2=ranked_2.FetchID[0:3]
-for i in top_2:
-    Profile_plot(i, tun)
+ranked_log=results.sort_values(by=[c2]).copy().reset_index(drop=True)
+top_log=ranked_log.FetchID[0:n]
+for i in range(n):
+    f=top_log[i]
+    label='Best Log Law fit #{}'.format(i+1)
+    Profile_plot(f, tun, label)
     
-ranked_3=results.sort_values(by=[c3]).copy().reset_index(drop=True)
-top_3=ranked_3.FetchID[0:3]
-for i in top_3:
-    Profile_plot(i, tun)
+ranked_TI=results.sort_values(by=[c3]).copy().reset_index(drop=True)
+top_TI=ranked_TI.FetchID[0:n]
+for i in range(n):
+    f=top_TI[i]
+    label='Best TI fit #{}'.format(i+1)
+    Profile_plot(f, tun, label)
     
 ranked_score=results.sort_values(by=['Score']).copy().reset_index(drop=True)
-top_score=ranked_score.FetchID[0:3]
-for i in top_score:
-    Profile_plot(i, tun)
+top_score=ranked_score.FetchID[0:n]
+for i in range(n):
+    f=top_score[i]
+    label='Best overall #{}'.format(i+1)
+    Profile_plot(f, tun, label)
 
-#t1=datetime.datetime.now()
-
-print('Done! Close all plot windows to exit')
-plt.show() #removed to run ranking methods for d opt below
-#plt.close('all')
-
+#print('Done! Close all plot windows to exit')
+#plt.show()          #shows all plots at once, holds until closed
 
 #%% Done
-# =============================================================================
-# print('Done!')
-# #t1=datetime.datetime.now()
-# dt= t1-t0
-# dt=dt.seconds
-# easygui.msgbox(msg="Done!\n Process took: {} seconds".format(dt))  
-# =============================================================================
-
-
-#%% test to optimze d variable
-# =============================================================================
-# 
-# def Err_d(fetch,tun,d):    
-#     #filter for fetch and WT
-#     df=F_t(F_f(df_og,fetch),tun)
-#     
-#     if not df.empty:
-#         #trim down data set to "good" window
-#         df=F_d(df,'Vertical Profile')
-#         df=df[df.Location.isin([
-#             #'Ref',
-#             #'-3r/2',
-#             '-r/2',
-#             'TTC',
-#             #'+r/2',        
-#                 ])]
-#         
-#         df['Z_fs']=df['Z(mm)']*SF/1000
-#         
-#         main=df['Main(mm)'].max()
-#         boost=df['Boost(mm)'].max()
-#         #block_ht=max(main,boost)*SF/1000
-#         block_ht=min(main,boost)*SF/1000
-#         
-#         # limit to "good" height region
-#         #df=df[df['Z_fs'].between(block_ht,Zmax)]
-#         
-#         Z=df.Z_fs
-#         #d=3*Zo_targ
-# 
-#         #U_pwr=pwr(Z,SF,Zo_targ)
-#         U_log=log(Z,SF,Zo_targ,d)
-#         #TI_targ=TI(Z,Zo_targ)
-#         
-#         uhf=df['Uhf/Uref']
-#         uomni=df['Uomni/Uref']
-#         ucombo=(uhf+uomni)/2
-#         
-#         #TIhf=df['TIUhf(%)']
-#         #TIomni=df['TIUomni(%)']
-#         #TIcombo=(TIhf+TIomni)/2
-#         
-#         #least squares method (i think)
-#         #U_pwr_err=sum((U_pwr-ucombo)**2)**.5
-#         U_log_err=sum((U_log-ucombo)**2)**.5
-#         #TI_err=sum((TI_targ-TIcombo)**2)**.5
-#         
-#         return U_log_err
-#     
-#     else: return 999
-# 
-# #fetch=results.FetchID[24]
-# 
-# d_check=pd.DataFrame()
-# d_check['d']=np.linspace(0,11,100)
-# d_check.set_index('d',inplace=True)
-# 
-# good_IDs=top_2
-# 
-# 
-# for fetch in good_IDs:
-#     d_check[fetch]=''
-#     for d in d_check.index:
-#         d_check[fetch].loc[d]=Err_d(fetch,tun,d)
-#     
-# 
-# =============================================================================
-
-
-
-
-
-
-
-
-
+print('Done!')
+t1=datetime.datetime.now()
+dt= t1-t0
+dt=dt.seconds
+easygui.msgbox(msg="Done!\n Process took: {} seconds".format(dt))  
