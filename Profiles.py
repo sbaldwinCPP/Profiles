@@ -3,6 +3,9 @@
 Created on Tue Oct 5 14:16:23 2021
 
 @author: sbaldwin
+New branch to plot east and west data together
+
+
 """
 
 #%% Import
@@ -48,14 +51,18 @@ def Inputs():
     print('Use GUI to select inputs...')
     msg = "Enter Settings"
     title = "Enter Settings"
-    fieldNames = ["Tunnel:", "Scale:", "Target Zo:"]
-    fieldValues = ['GDW', 240, 0.35]  #Defaults
+    fieldNames = ["Tunnel:", "Scale:", "Target Zo:", "Include TT roughness?:"]
+    fieldValues = ['ALL', 240, 0.3, False]  #Defaults
     inputs=easygui.multenterbox(msg, title, fieldNames, fieldValues)
     if inputs==None: sys.exit()
-    inputs= inputs[0], int(inputs[1]), float(inputs[2])
+    #inputs= inputs[0], int(inputs[1]), float(inputs[2]), inputs[3]
+    if inputs[3].lower() in ['false','f','no']:
+        inputs= inputs[0], int(inputs[1]), float(inputs[2]), False
+    elif inputs[3].lower() in ['true','t','yes']:
+        inputs= inputs[0], int(inputs[1]), float(inputs[2]), True
     return inputs
 
-# og dataframe filters
+# og dataframe filters - optimize later to be 1 func w/ mult. cases
 def F_f(df,fetch):
     return df[df.Fetch==fetch].copy()
 
@@ -87,26 +94,6 @@ def Pwr_Law(z,zref,Zo):    #   u/Uref = (z/Zo)**n
 def nFromZo(Zo):    
     return 0.24 + 0.096*np.log10(Zo) + 0.016*(np.log10(Zo)**2)
 
-# =============================================================================
-# #   turbulence equation
-# #   CPP handbook - equation 23 (from EPA, 1981)
-# #   valid between 5 and 100 m
-# def TI(z,Zo):
-#     n=nFromZo(Zo)
-#     return n*(np.log(30/Zo))/(np.log(z/Zo))*100
-# 
-# #   Log Law
-# #   ADC report - equation B.1
-# def log_ADC(z,Zo):      #   U/Uinf = 2.5*(UstarZero/Uinf)*ln(z/Zo)
-#     FR=F_ratio(Zo)      #   (UstarZero/Uinf)
-#     return 2.5*FR*np.log(z/Zo)
-# 
-# #   Friction Velocity Ratio
-# #   ADC report - equation B.2
-# def F_ratio(Zo):
-#     return np.sqrt(2.75e-3+6e-4*np.log10(Zo))
-# =============================================================================
-
 #%% EXCEL-derived formulas
 #   U* - theory
 def Ustar_xl(Zo,Zref,Uref):
@@ -131,7 +118,7 @@ def TI_xl(z,Zo):
         t1=n*np.log(30/Zo)/np.log(z[z<100]/Zo)
         t2=n*(np.log(30/Zo))/np.log(100/Zo)+(z[z>=100]-100)/500*(0.01-n*np.log(30/Zo)/np.log(100/Zo))
         t=t1.append(t2)
-    # operaate on a single z
+    # operate on a single z
     except:
         if z < 100:
             t=n*np.log(30/Zo)/np.log(z/Zo)
@@ -139,56 +126,6 @@ def TI_xl(z,Zo):
             t=n*(np.log(30/Zo))/np.log(100/Zo)+(z-100)/500*(0.01-n*np.log(30/Zo)/np.log(100/Zo))
     return t*100
     
-#%% log law from wikipedia
-
-# =============================================================================
-# #   Holmes JD. Wind Loading of Structures. 3rd ed. Boca Raton, Florida: CRC Press; 2015.
-# def log_w(z,zref,Zo):
-#     #d=  # zero-plane displacement:
-#          # height in meters above the ground at which zero wind speed is 
-#          # achieved as a result of flow obstacles such as trees or buildings
-#     d=0
-#     return np.log((z-d)/Zo)/np.log((zref-d)/Zo)
-# 
-# def Ustar_over_Uref(Zref,Zo): 
-#     #adapted from U(z)=(u*/k)*ln((z-d)/Zo)
-#     k=0.41
-#     d=0
-#     return k/np.log((Zref-d)/Zo)
-# 
-# def Ustar(u1,u2,z1,z2):
-#     k=0.41
-#     d=0
-#     return k*(u2-u1)/np.log((z2-d)/(z1-d))
-# =============================================================================
-
-
-#%%   Log functions from RP's matlab code
-
-# =============================================================================
-# 
-# #   not in use, does not provide a good fit to any data
-# def old_log(z,Zo):    #   u/Uinf = 2.5*(Ustar0/Uinf)*ln(z/Zo)
-#     Fr=F_ratio(Zo)
-#     return 2.5*Fr*np.log(z/Zo)
-# 
-# def F_ratio(Zo):
-#     return np.sqrt(2.75e-3+6e-4*np.log10(Zo))
-# 
-# # =============================================================================
-# #   ###     Also found this in the .txt copy of RP code
-# #   #LogLaw=@(zo,z)((sqrt(2.75*10^-3+6*10^-4*log10(zo))*...
-# #           #(600/SF)^(0.24+0.096*log10(zo)+0.016*log10(zo)^2)*Uref)/0.41*log(z/zo));
-# # =============================================================================
-# 
-# def sqrt(x):
-#     return x**.5
-# 
-# def log_law(z,zo,Uref):
-#     return sqrt(2.75e-3+6e-4*np.log10(zo))*(600/SF)**(0.24+0.096*np.log10(zo)+0.016*np.log10(zo)**2)*Uref/0.41*np.log(z/zo)
-# =============================================================================
-
-
 #%% plotting functions
 
 #colorbar setup func
@@ -202,15 +139,20 @@ def cbScale(bounds):
     return sm
 
 #   mostly for QA
-def Profile_plot(fetch, tun, label, ID, results):
+def Profile_plot(fetch, label, ID, results='', tun='ALL'):
     #for debugging
     #FetchID=df_og['Fetch'].dropna().drop_duplicates().reset_index(drop=True)
     #fetch=FetchID[27]  #for manual fetch selection
     
     #parse results info for given fetch
-    R2pwr=results.iloc[ID,4].round(3)
-    R2log=results.iloc[ID,5].round(3)
-    R2ti=results.iloc[ID,6].round(3)
+    try:
+        R2pwr=results.iloc[ID,4].round(3)
+        R2log=results.iloc[ID,5].round(3)
+        R2ti=results.iloc[ID,6].round(3)
+    except AttributeError:
+        R2pwr=''
+        R2log=''
+        R2ti=''
     
     data=F_f(df_og,fetch)
     
@@ -227,8 +169,9 @@ def Profile_plot(fetch, tun, label, ID, results):
     trip_ht=max(t1,t2)*SF/1000
     spire_ht=max(s1,s2)*SF/1000
     
-    data=F_t(data,tun)
-    
+    if tun=='GDE' or tun=='GDW':
+        data=F_t(data,tun)
+        
 # =============================================================================
 #     #limit data to specific locations
 #     data=data[data.Location.isin([
@@ -240,19 +183,21 @@ def Profile_plot(fetch, tun, label, ID, results):
 #             ])]
 # =============================================================================
     
-    #sort by abs distance from TT center, show most centered points on top of plot
+    # sort by abs distance from TT center, show most centered points at front
     data['abs_x']=abs(data['X(mm)']+1000)
     data=data.sort_values('abs_x', ascending=False)
     
+    # separate horizontal search from vertical
     horiz=F_d(data,'Lateral Profile')
     data=F_d(data,'Vertical Profile')
 
+    # z heights for ideal curves
     z = np.linspace(1,SF*1.2,num=1000)
 
     #### actual plotting, all above is just data manipulation/prep
     
-    figure,ax = plt.subplots(1,2, sharey=True, figsize=(11,7)) #custom fig size
-    #figure,ax = plt.subplots(1,2, sharey=True)
+    fig,ax = plt.subplots(1,2, sharey=True, figsize=(11,7)) #custom fig size
+    #fig,ax = plt.subplots(1,2, sharey=True)
     
     # target U pwr - ADC
     n=nFromZo(Zo_targ)
@@ -326,20 +271,57 @@ def Profile_plot(fetch, tun, label, ID, results):
                     ha='left')
     
     # fake data for legend
-    ax[0].scatter(x=-1, y=-SF, marker='x', c='k', label='HF')
-    ax[0].scatter(x=-1, y=-SF, marker='+', c='k', label='12HP')
     
-    # velocity data
-    ax[0].scatter(x=data['Uhf/Uref'], y=data['Z_fs'], marker='x', c=sm.cmap(sm.norm(data['X(mm)'])))
-    ax[0].scatter(x=data['Uomni/Uref'], y=data['Z_fs'], marker='+', c=sm.cmap(sm.norm(data['X(mm)'])))
+    # East
+    if tun=='GDE' or tun=='ALL':
+        ax[0].scatter(x=-1, y=-SF, marker='x', c='k', label='GDE HF')
+        ax[0].scatter(x=-1, y=-SF, marker='+', c='k', label='GDE 12HP')
+    # West
+    if tun=='GDW' or tun=='ALL':
+        ax[0].scatter(x=-1, y=-SF, marker='s', edgecolors='k', facecolors='none', label='GDW HF')
+        ax[0].scatter(x=-1, y=-SF, marker='^', edgecolors='k', facecolors='none', label='GDW 12HP')
     
-    # turbulence data
-    ax[1].scatter(x=data['TIUhf(%)'], y=data['Z_fs'], marker='x', c=sm.cmap(sm.norm(data['X(mm)'])))
-    ax[1].scatter(x=data['TIUomni(%)'], y=data['Z_fs'], marker='+', c=sm.cmap(sm.norm(data['X(mm)'])))
     
-    # lateral profile plots
-    ax[0].scatter(x=horiz['HFxvar'], y=horiz['HFyvar'], marker='x', c=sm.cmap(sm.norm(horiz['X(mm)'])))
-    ax[0].scatter(x=horiz['Omnixvar'], y=horiz['Omniyvar'], marker='+', c=sm.cmap(sm.norm(horiz['X(mm)'])))
+    ### actual tunnel data
+    # East
+    if tun=='GDE' or tun=='ALL':
+        E=F_t(data,'GDE')
+        horiz_e=F_t(horiz,'GDE')
+        
+        color=sm.cmap(sm.norm(E['X(mm)']))
+        color_h=sm.cmap(sm.norm(horiz_e['X(mm)']))
+        
+        # velocity data
+        ax[0].scatter(x=E['Uhf/Uref'], y=E['Z_fs'], marker='x', c=color)
+        ax[0].scatter(x=E['Uomni/Uref'], y=E['Z_fs'], marker='+', c=color)
+        
+        # turbulence data
+        ax[1].scatter(x=E['TIUhf(%)'], y=E['Z_fs'], marker='x', c=color)
+        ax[1].scatter(x=E['TIUomni(%)'], y=E['Z_fs'], marker='+', c=color)
+        
+        # lateral profile plots
+        ax[0].scatter(x=horiz_e['HFxvar'], y=horiz_e['HFyvar'], marker='x', c=color_h)
+        ax[0].scatter(x=horiz_e['Omnixvar'], y=horiz_e['Omniyvar'], marker='', c=color_h)
+    
+    
+    # West
+    if tun=='GDW' or tun=='ALL':
+        W=F_t(data,'GDW')
+        horiz_w=F_t(horiz,'GDW')
+        color=sm.cmap(sm.norm(W['X(mm)']))
+        color_h=sm.cmap(sm.norm(horiz_w['X(mm)']))
+        
+        # velocity data
+        ax[0].scatter(x=W['Uhf/Uref'], y=W['Z_fs'], marker='s', edgecolors=color, facecolors='none')
+        ax[0].scatter(x=W['Uomni/Uref'], y=W['Z_fs'], marker='^', edgecolors=color, facecolors='none')
+        
+        # turbulence data
+        ax[1].scatter(x=W['TIUhf(%)'], y=W['Z_fs'], marker='s', edgecolors=color, facecolors='none')
+        ax[1].scatter(x=W['TIUomni(%)'], y=W['Z_fs'], marker='^', edgecolors=color, facecolors='none')
+        
+        # lateral profile plots
+        ax[0].scatter(x=horiz_w['HFxvar'], y=horiz_w['HFyvar'], marker='s', edgecolors=color_h, facecolors='none')
+        ax[0].scatter(x=horiz_w['Omnixvar'], y=horiz_w['Omniyvar'], marker='^', edgecolors=color_h, facecolors='none')
 
     #legend, axis bounds, and title setup
     ax[0].legend()
@@ -357,12 +339,12 @@ def Profile_plot(fetch, tun, label, ID, results):
     plt.suptitle('{}:{} \n ID#{}:{} \n {}'.format(tun, targets, ID, fetch, label))
     
     # save the plot
-    Plot_Path=os.path.join(os.getcwd(),'Plots',tun,targets,'{}_{}_{}.png'.format(tun,targets,label))
+    Plot_Path=os.path.join(os.getcwd(),'Plots','Include_TT_{}'.format(TT),tun,targets,'{}_{}_{}.png'.format(tun,targets,label))
     Plots_Folder=os.path.dirname(Plot_Path)
     if not os.path.exists(Plots_Folder): os.makedirs(Plots_Folder)
     plt.savefig(Plot_Path)
     
-    plt.close()
+    #plt.close()
 
 #%% error calculations
 
@@ -372,24 +354,23 @@ def rsquared(x, y):
     return r_value**2
 
 
-def Calc_Error(fetch,tun):    
+def Calc_Error(fetch, tun):    
     #for debugging:
     #   FetchID=df_og['Fetch'].dropna().drop_duplicates().reset_index(drop=True)
     #   fetch=FetchID[10] 
     
-    
-    ##### need to re-work this to keep all variables together in a  dataframe for each region
-    #####
-    
     #filter for fetch and WT
-    df=F_t(F_f(df_og,fetch),tun)
+    df=F_f(df_og,fetch)
+    
+    if tun=='GDW' or tun=='GDE':
+        df=F_t(df,tun)
     
     #trim down data set to "good" window
     df=F_d(df,'Vertical Profile')
     df=df[df.Location.isin([
                             #'Ref',
-                            '-3r/2',
-                            '-r/2',
+                            '-3r/2',    #-2600 mm
+                            '-r/2',     #-900 mm
                             #'TTC',
                             #'+r/2',        
                                 ])]
@@ -397,6 +378,7 @@ def Calc_Error(fetch,tun):
     if not df.empty:
         df['Z_fs']=df['Z(mm)']*SF/1000
         
+        #new column names for columns with annoying special characters
         new=['Ur',
             'Uh',
             'Uo',
@@ -487,7 +469,8 @@ def Results(df_og, tun, targets):
     df=df_og.copy()
     results=pd.DataFrame()
     results['FetchID']=df['Fetch'].dropna().drop_duplicates().reset_index(drop=True)
-    #df=df[df['Notes'].isna()] #drop any trials with notes, assume data is bad # i think this causes problems
+    #df=df[df['Notes'].isna()] #drop any trials with notes, assume data is bad 
+    # i think this causes problems
     
     #set column names as variables, easy to change later
     col=[   'U_pwr_ERR',
@@ -511,7 +494,7 @@ def Results(df_og, tun, targets):
         
     # save results
     print('Saving results...')
-    Results_Path=os.path.join(os.getcwd(),'Results',tun,'{}_{}_results.csv'.format(tun,targets))
+    Results_Path=os.path.join(os.getcwd(),'Results','Include_TT_{}'.format(TT),tun,'{}_results.csv'.format(targets))
     Results_Folder=os.path.dirname(Results_Path)
     if not os.path.exists(Results_Folder): os.makedirs(Results_Folder)
     results.to_csv(Results_Path)
@@ -519,17 +502,55 @@ def Results(df_og, tun, targets):
     return results
     
 def Ranked_Plots(results):
-    columns=results.columns
-    col=columns[~columns.isin(['FetchID','Score'])]
+    #columns=results.columns
+    #col=columns[~columns.isin(['FetchID','Score'])]
     
     print('Generating plots...')
     
     n=3 #number of plots per set
     
+    ###vvv USE THIS FOR MEAN ERROR RANKING
+    results['Score']=results.U_pwr_ERR*results.U_log_ERR*(results.TI_ERR**2)
+    
+    ranked_pwr=results.sort_values(by='U_pwr_ERR',ascending=True).copy().reset_index(drop=True)
+    top_pwr=ranked_pwr.FetchID[0:n]
+    
+    ranked_log=results.sort_values(by='U_log_ERR',ascending=True).copy().reset_index(drop=True)
+    top_log=ranked_log.FetchID[0:n]    
+    
+    ranked_TI=results.sort_values(by='TI_ERR',ascending=True).copy().reset_index(drop=True)
+    top_TI=ranked_TI.FetchID[0:n]
+    
+    ranked_score=results.sort_values(by=['Score'],ascending=True).copy().reset_index(drop=True)
+    top_score=ranked_score.FetchID[0:n]
+    
+    for i in range(n):
+        f_pwr=top_pwr[i]
+        label='Best Power Law fit #{}'.format(i+1)
+        ID=results[results.FetchID==f_pwr].index[0]
+        Profile_plot(f_pwr, label, ID, results, tun)
+        
+        f_log=top_log[i]
+        label='Best Log Law fit #{}'.format(i+1)
+        ID=results[results.FetchID==f_log].index[0]
+        Profile_plot(f_log, label, ID, results, tun)
+        
+        f_ti=top_TI[i]
+        label='Best TI fit #{}'.format(i+1)
+        ID=results[results.FetchID==f_ti].index[0]
+        Profile_plot(f_ti, label, ID, results, tun)
+        
+        f_s=top_score[i]
+        label='Best overall #{}'.format(i+1)
+        ID=results[results.FetchID==f_s].index[0]
+        Profile_plot(f_s, label, ID, results, tun)        
+    ###^^^ USE THIS FOR ERROR RANKING
+
+# this needs fixing if used
 # =============================================================================
-#     ###vvv USE THIS FOR ERROR RANKING
-#     results['Score']=results.U_pwr_ERR*results.U_log_ERR*(results.TI_ERR**2)
-#     ranked_pwr=results.sort_values(by='U_pwr_ERR',ascending=True).copy().reset_index(drop=True)
+#     ###vvv USE THIS FOR R^2 RANKING
+#     results['Score']=results['U_pwr_r^2']*results['U_log_r^2']*(results['TI_r^2']**2)
+#     ranked_pwr=results.sort_values(by='U_pwr_r^2',ascending=False).copy().reset_index(drop=True)
 #     top_pwr=ranked_pwr.FetchID[0:n]
 #     for i in range(n):
 #         f=top_pwr[i]
@@ -537,7 +558,7 @@ def Ranked_Plots(results):
 #         ID=results[results.FetchID==f].index[0]
 #         Profile_plot(f, tun, label, ID, results)
 #         
-#     ranked_log=results.sort_values(by='U_log_ERR',ascending=True).copy().reset_index(drop=True)
+#     ranked_log=results.sort_values(by='U_log_r^2',ascending=False).copy().reset_index(drop=True)
 #     top_log=ranked_log.FetchID[0:n]
 #     for i in range(n):
 #         f=top_log[i]
@@ -545,7 +566,7 @@ def Ranked_Plots(results):
 #         ID=results[results.FetchID==f].index[0]
 #         Profile_plot(f, tun, label, ID, results)
 #         
-#     ranked_TI=results.sort_values(by='TI_ERR',ascending=True).copy().reset_index(drop=True)
+#     ranked_TI=results.sort_values(by='TI_r^2',ascending=False).copy().reset_index(drop=True)
 #     top_TI=ranked_TI.FetchID[0:n]
 #     for i in range(n):
 #         f=top_TI[i]
@@ -553,53 +574,18 @@ def Ranked_Plots(results):
 #         ID=results[results.FetchID==f].index[0]
 #         Profile_plot(f, tun, label, ID, results)
 #         
-#     ranked_score=results.sort_values(by=['Score'],ascending=True).copy().reset_index(drop=True)
+#     ranked_score=results.sort_values(by=['Score'],ascending=False).copy().reset_index(drop=True)
 #     top_score=ranked_score.FetchID[0:n]
 #     for i in range(n):
 #         f=top_score[i]
 #         label='Best overall #{}'.format(i+1)
 #         ID=results[results.FetchID==f].index[0]
 #         Profile_plot(f, tun, label, ID, results)
-#     ###^^^ USE THIS FOR ERROR RANKING
+#     ###^^^ USE THIS FOR R^2 RANKING
 # =============================================================================
 
-    ###vvv USE THIS FOR R^2 RANKING
-    results['Score']=results['U_pwr_r^2']*results['U_log_r^2']*(results['TI_r^2']**2)
-    ranked_pwr=results.sort_values(by='U_pwr_r^2',ascending=False).copy().reset_index(drop=True)
-    top_pwr=ranked_pwr.FetchID[0:n]
-    for i in range(n):
-        f=top_pwr[i]
-        label='Best Power Law fit #{}'.format(i+1)
-        ID=results[results.FetchID==f].index[0]
-        Profile_plot(f, tun, label, ID, results)
-        
-    ranked_log=results.sort_values(by='U_log_r^2',ascending=False).copy().reset_index(drop=True)
-    top_log=ranked_log.FetchID[0:n]
-    for i in range(n):
-        f=top_log[i]
-        label='Best Log Law fit #{}'.format(i+1)
-        ID=results[results.FetchID==f].index[0]
-        Profile_plot(f, tun, label, ID, results)
-        
-    ranked_TI=results.sort_values(by='TI_r^2',ascending=False).copy().reset_index(drop=True)
-    top_TI=ranked_TI.FetchID[0:n]
-    for i in range(n):
-        f=top_TI[i]
-        label='Best TI fit #{}'.format(i+1)
-        ID=results[results.FetchID==f].index[0]
-        Profile_plot(f, tun, label, ID, results)
-        
-    ranked_score=results.sort_values(by=['Score'],ascending=False).copy().reset_index(drop=True)
-    top_score=ranked_score.FetchID[0:n]
-    for i in range(n):
-        f=top_score[i]
-        label='Best overall #{}'.format(i+1)
-        ID=results[results.FetchID==f].index[0]
-        Profile_plot(f, tun, label, ID, results)
-    ###^^^ USE THIS FOR R^2 RANKING
 
-
-#%% Get file & initialize
+#%% Get file & initialize - should make this a function later
 
 #hard-coded filepath of OG data (Cross-network)
 #filepath='//gd-fs3/CentralDataCache/Projects/G153E/Results_Post_Processed/BLhunts/2020-06-GoldPlateOutput1/GoldPlateBrief.xlsx'
@@ -633,17 +619,31 @@ else:                                       #if no .pkl, try to load data
     print('Saving dataframe...')
     df_og.to_pickle(pklpath)
 
-# get inputs, in future may turn into an array of values to loop thru
-tun,SF,Zo_targ=Inputs()
-targets='{}-{}'.format(SF,Zo_targ)            
 
+#TT=False
+        
+### single roughness                
+# get inputs, in future should turn into an array of values to loop thru
+tun,SF,Zo_targ,TT=Inputs()
+targets='{}-{}'.format(SF,Zo_targ)            
+###
+
+### pre-process fetch ID to ignore TT roughness
+if not TT:
+    df_og['fetch_og']=df_og.Fetch.copy()
+    for i in df_og.index:
+        #print(i)
+        s=df_og['fetch_og'][i]
+        try:
+            df_og.loc[i,'Fetch']=s[:s.find('TT')].strip()
+        except AttributeError:
+            pass
+###
 
 #%% Begin real script
 t0 = datetime.datetime.now()    #start process timer
 inidir=os.getcwd()
 
-#%% plot results
-#fetch=results.FetchID[10]  #for manual fetch selection
 
 #set plot style 
 mpl.rcdefaults()            #reset to defaults
@@ -652,34 +652,38 @@ plt.style.use(styles[14])   #set style
 cmap='twilight'             #set colormap
 #cmap='twilight_shifted'    #if plot style has dark background
 
-#   Run for single set of targets
+### single roughness
 results=Results(df_og, tun , targets)
 if easygui.ynbox('Generate Plots?'):
     Ranked_Plots(results)
+###
+  
 
-####vvv         enable to loop through array of targets
 # =============================================================================
+# ####vvv         enable to loop through array of targets
 # 
 # tunnel=['GDW','GDE']
+# #tunnel= "ALL"
 # Scale=[180,240,300]
 # Zo=[0.05,.1,.2,.3,.4,.5,.6,.7,.8,.9,1]
 # 
 # for tun in tunnel:
-#     print(tun)
 #     for SF in Scale:
-#         print(SF)
+#         #print(SF)
 #         for Zo_targ in Zo:
-#             print(Zo_targ)
+#             #print(Zo_targ)
 #             targets='{}-{}'.format(SF,Zo_targ)
+#             print(targets)
 #             results=Results(df_og, tun , targets)
 #             Ranked_Plots(results)
 # 
+# ####^^^         enable to loop through arrays of tun, scale, Zo
 # =============================================================================
-####^^^         enable to loop through arrays of tun, scale, Zo
 
 #%% Done
 print('Done!')
 t1=datetime.datetime.now()
 dt= t1-t0
 dt=dt.seconds
-easygui.msgbox(msg="Done!\n Process took: {} seconds".format(dt))  
+easygui.msgbox(msg="Done!\n Process took: {} seconds\nPress ok to view plots".format(dt))  
+plt.show()
